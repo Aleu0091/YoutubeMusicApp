@@ -10,9 +10,8 @@ const path = require("path");
 
 let mainWindow;
 let tray;
-let isQuitting = false; // 애플리케이션 종료 플래그
+let isQuitting = false; 
 
-// 단일 인스턴스 락 요청
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -34,12 +33,12 @@ if (!gotTheLock) {
 
     app.on("window-all-closed", () => {
         if (!isQuitting && process.platform !== "darwin") {
-            mainWindow.hide(); // 모든 창이 닫히면 애플리케이션 종료 대신 창을 숨깁니다.
+            mainWindow.hide(); 
         }
     });
 
     app.on("before-quit", () => {
-        isQuitting = true; // 애플리케이션이 종료될 때 상태를 업데이트합니다.
+        isQuitting = true; 
     });
 
     function createWindow() {
