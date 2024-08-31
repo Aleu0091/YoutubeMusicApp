@@ -2,101 +2,128 @@ const {
     app,
     BrowserWindow,
     Menu,
-    globalShortcut,
     Tray,
     ipcMain,
+    globalShortcut,
 } = require("electron");
 const path = require("path");
 
 let mainWindow;
 let tray;
+let isQuitting = false; // 애플리케이션 종료 플래그
 
-function createWindow() {
-    Menu.setApplicationMenu(null);
+// 단일 인스턴스 락 요청
+const gotTheLock = app.requestSingleInstanceLock();
 
-    mainWindow = new BrowserWindow({
-        width: 1000,
-        height: 600,
-        icon: path.join(__dirname, "app-icon.png"),
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            enableRemoteModule: false,
-            webSecurity: false,
-            backgroundThrottling: false,
-            plugins: true,
-            partition: "persist:youtube-music",
-        },
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on("second-instance", (event, argv, workingDirectory) => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+        }
+        if (tray) {
+            mainWindow.show();
+        }
     });
 
-    mainWindow.loadURL("https://music.youtube.com");
-
-    mainWindow.on("close", (event) => {
-        event.preventDefault();
-        mainWindow.hide();
+    app.on("ready", () => {
+        createWindow();
     });
 
-    tray = new Tray(path.join(__dirname, "tray-icon.png"));
-    const contextMenu = Menu.buildFromTemplate([
-        { label: "Show App", click: () => mainWindow.show() },
-        {
-            label: "Quit",
-            click: () => {
-                tray.destroy();
-                app.exit();
+    app.on("window-all-closed", () => {
+        if (!isQuitting && process.platform !== "darwin") {
+            mainWindow.hide(); // 모든 창이 닫히면 애플리케이션 종료 대신 창을 숨깁니다.
+        }
+    });
+
+    app.on("before-quit", () => {
+        isQuitting = true; // 애플리케이션이 종료될 때 상태를 업데이트합니다.
+    });
+
+    function createWindow() {
+        Menu.setApplicationMenu(null);
+
+        mainWindow = new BrowserWindow({
+            width: 1000,
+            height: 600,
+            icon: path.join(__dirname, "app-icon.png"),
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                enableRemoteModule: false,
+                webSecurity: false,
+                backgroundThrottling: false,
+                plugins: true,
+                partition: "persist:youtube-music",
             },
-        },
-    ]);
-    tray.setToolTip("YouTube Music");
-    tray.setContextMenu(contextMenu);
+        });
 
-    tray.on("double-click", () => {
-        mainWindow.show();
-    });
+        mainWindow.loadURL("https://music.youtube.com");
 
-    setInterval(() => {
-        mainWindow.webContents
-            .executeJavaScript(
-                `
-            (function() {
-                var playPauseButton = document.querySelector('.play-pause-button');
-                if (!playPauseButton) {
-                    return { isPlaying: null, info: "No track playing or unable to detect" };
-                }
+        mainWindow.on("close", (event) => {
+            if (!isQuitting) {
+                event.preventDefault();
+                mainWindow.hide();
+            }
+        });
 
-                var isPlaying = playPauseButton.getAttribute('aria-label') === '일시중지' || playPauseButton.getAttribute('aria-label') === 'pause';
+        tray = new Tray(path.join(__dirname, "tray-icon.png"));
+        const contextMenu = Menu.buildFromTemplate([
+            { label: "Show App", click: () => mainWindow.show() },
+            {
+                label: "Quit",
+                click: () => {
+                    isQuitting = true;
+                    tray.destroy();
+                    app.quit();
+                },
+            },
+        ]);
+        tray.setToolTip("YouTube Music");
+        tray.setContextMenu(contextMenu);
 
-                var titleElement = document.querySelector('.title.ytmusic-player-bar');
-                var artistElement = document.querySelector('.byline.ytmusic-player-bar');
+        tray.on("double-click", () => {
+            mainWindow.show();
+        });
 
-                var title = titleElement ? titleElement.innerText : "Unknown Title";
-                var artist = artistElement ? artistElement.innerText : "Unknown Artist";
+        setInterval(() => {
+            mainWindow.webContents
+                .executeJavaScript(
+                    `
+                (function() {
+                    var playPauseButton = document.querySelector('.play-pause-button');
+                    if (!playPauseButton) {
+                        return { isPlaying: null, info: "No track playing or unable to detect" };
+                    }
 
-                return { isPlaying: isPlaying, info: title + " - " + artist };
-            })();
-        `
-            )
-            .then((result) => {
-                console.log(result);
-                if (result.isPlaying === null) {
-                    console.log("Unable to detect playback status.");
-                } else if (result.isPlaying) {
-                    tray.setToolTip("Now Playing: " + result.info);
-                } else {
-                    tray.setToolTip("Not Playing");
-                }
-            });
-    }, 5000);
-}
+                    var isPlaying = playPauseButton.getAttribute('aria-label') === '일시중지' || playPauseButton.getAttribute('aria-label') === 'pause';
 
-app.whenReady().then(createWindow);
+                    var titleElement = document.querySelector('.title.ytmusic-player-bar');
+                    var artistElement = document.querySelector('.byline.ytmusic-player-bar');
 
-app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-        app.quit();
+                    var title = titleElement ? titleElement.innerText : "Unknown Title";
+                    var artist = artistElement ? artistElement.innerText : "Unknown Artist";
+
+                    return { isPlaying: isPlaying, info: title + " - " + artist };
+                })();
+            `
+                )
+                .then((result) => {
+                    console.log(result);
+                    if (result.isPlaying === null) {
+                        console.log("Unable to detect playback status.");
+                    } else if (result.isPlaying) {
+                        tray.setToolTip("Now Playing: " + result.info);
+                    } else {
+                        tray.setToolTip("Not Playing");
+                    }
+                });
+        }, 5000);
     }
-});
 
-app.on("will-quit", () => {
-    globalShortcut.unregisterAll();
-});
+    app.on("will-quit", () => {
+        globalShortcut.unregisterAll();
+    });
+}
